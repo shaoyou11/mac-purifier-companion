@@ -71,6 +71,8 @@ struct DeviceStatus: Codable, Equatable, Sendable {
     var supported: Bool
     var supportDescription: String
 
+    var maxLevel: Int { model == "zhimi.airpurifier.ma4" ? 14 : 17 }
+
     var productTitle: String { productName ?? (model.isEmpty ? "型号未知" : model) }
 }
 
@@ -317,7 +319,7 @@ struct ConfigDraft: Equatable {
         "升档 \(Self.formattedNumber(riseSeconds)) 秒 · 回落 \(Self.formattedNumber(fallSeconds)) 秒 · 最短调档 \(Self.formattedNumber(minAdjustSeconds)) 秒 · 采样 \(Self.text(sampleSeconds)) 秒 · 过期 \(Self.text(staleSeconds)) 秒"
     }
 
-    func validated() -> Result<LinkConfig, DraftValidationError> {
+    func validated(maxLevel: Int = 17) -> Result<LinkConfig, DraftValidationError> {
         guard let medium = mediumThresholdValue,
               let high = highThresholdValue,
               let down = downThresholdValue,
@@ -341,8 +343,8 @@ struct ConfigDraft: Equatable {
             return .failure(.message("数据过期时间必须大于采样间隔。"))
         }
 
-        let mediumLevelResult = Self.level(mediumLevel, name: "中档")
-        let highLevelResult = Self.level(highLevel, name: "高档")
+        let mediumLevelResult = Self.level(mediumLevel, name: "中档", maxLevel: maxLevel)
+        let highLevelResult = Self.level(highLevel, name: "高档", maxLevel: maxLevel)
         guard case let .success(parsedMediumLevel) = mediumLevelResult else {
             if case let .failure(error) = mediumLevelResult { return .failure(error) }
             preconditionFailure("Result case changed while validating the draft")
@@ -370,10 +372,10 @@ struct ConfigDraft: Equatable {
         ))
     }
 
-    private static func level(_ text: String, name: String) -> Result<Int, DraftValidationError> {
+    private static func level(_ text: String, name: String, maxLevel: Int) -> Result<Int, DraftValidationError> {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let value = Int(trimmed), (0...17).contains(value) else {
-            return .failure(.message("\(name)最爱等级必须是 0–17 的整数。"))
+        guard let value = Int(trimmed), (0...maxLevel).contains(value) else {
+            return .failure(.message("\(name)最爱等级必须是 0–\(maxLevel) 的整数。"))
         }
         return .success(value)
     }

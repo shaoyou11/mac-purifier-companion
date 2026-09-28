@@ -70,6 +70,11 @@
       "name": "Mi Air Purifier 2H",
       "imageURL": "https://cdn.awssgp0.fds.api.mi-img.com/miio.files/developer_15470144879uw2ei4h.png",
       "sourceURL": "https://home.miot-spec.com/spec/zhimi.airpurifier.mc2"
+    },
+    "zhimi.airpurifier.ma4": {
+      "name": "小米空气净化器 3",
+      "imageURL": null,
+      "sourceURL": null
     }
   }
 }

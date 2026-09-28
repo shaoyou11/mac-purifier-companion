@@ -99,7 +99,7 @@ mkdir -p "$RUNTIME_SITE"
 find "$APP/Contents/Resources/runtime" -type d -name __pycache__ -prune -exec rm -rf {} +
 find "$APP/Contents/Resources/runtime" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 
-for script_name in worker.py pair_device.py link_rules.py history_store.py host_metrics.py; do
+for script_name in worker.py pair_device.py purifier_protocol.py link_rules.py history_store.py host_metrics.py; do
     [[ -f "$ROOT/scripts/$script_name" ]] || fail "required business script missing: $script_name"
     /usr/bin/ditto "$ROOT/scripts/$script_name" "$APP/Contents/Resources/scripts/$script_name"
 done

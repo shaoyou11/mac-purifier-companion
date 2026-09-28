@@ -7,10 +7,12 @@ struct PurifierManualControlView: View {
     @State private var draggingSlider = false
     @State private var dragChanged = false
 
+    private var maxLevel: Int { controller.status?.device.maxLevel ?? 17 }
+
     var body: some View {
         ContentSection(
             title: controller.status?.account.paired == true ? controller.status?.device.productTitle ?? "净化器风量" : "净化器风量",
-            subtitle: "手动可选 0–17 整数档位；实际 RPM 来自设备回读，不是设定值"
+            subtitle: "手动可选 0–\(maxLevel) 整数档位；实际 RPM 来自设备回读，不是设定值"
         ) {
             VStack(alignment: .leading, spacing: 18) {
                 modeControls
@@ -101,7 +103,7 @@ struct PurifierManualControlView: View {
                     get: { draftLevel },
                     set: { draftLevel = $0; if draggingSlider { dragChanged = true } }
                 ),
-                in: 0...17,
+                in: 0...Double(maxLevel),
                 step: 1
             ) { editing in
                 if editing {
@@ -119,7 +121,7 @@ struct PurifierManualControlView: View {
             HStack {
                 Text("低档 0")
                 Spacer()
-                Text("高档 17")
+                Text("高档 \(maxLevel)")
             }
             .font(.caption.monospacedDigit())
             .foregroundStyle(.secondary)
@@ -203,7 +205,7 @@ struct PurifierManualControlView: View {
     }
 
     private var selectedLevel: Int {
-        min(max(Int(draftLevel.rounded()), 0), 17)
+        min(max(Int(draftLevel.rounded()), 0), maxLevel)
     }
 
     private var actualRPM: String {
@@ -295,7 +297,7 @@ struct PurifierManualControlView: View {
     private func synchronizeDraftFromStatus() {
         guard !draggingSlider,
               let current = controller.status?.device.level,
-              0...17 ~= current
+              0...maxLevel ~= current
         else { return }
         draftLevel = Double(current)
     }

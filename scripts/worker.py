@@ -21,8 +21,7 @@ from typing import Any
 
 import keyring
 from keyring.backends.macOS import Keyring
-from miio import AirPurifier
-from miio.integrations.airpurifier.zhimi.airpurifier import OperationMode, SUPPORTED_MODELS
+from purifier_protocol import AirPurifier, OperationMode, SUPPORTED_MODELS, max_level, validate_level
 
 from history_store import HistoryStore
 from host_metrics import read_system_conditions, sample_top_processes
@@ -280,7 +279,7 @@ class Worker:
         return bool(
             not self.busy and self.mode != "manual" and self.snapshot is None
             and not self._temperature_stale() and self.device_view["reachable"]
-            and self.device_view["power"] is True and all(level is not None and level in self.verified for level in levels)
+            and self.device_view["power"] is True and all(level is not None and 0 <= level <= max_level(self.device_view["model"]) and level in self.verified for level in levels)
             and levels[0] < levels[1]
         )
 
@@ -324,7 +323,7 @@ class Worker:
             self.device_view.update({
                 "model": model, "ip": metadata["ip"], "name": str(metadata.get("name") or model),
                 **_catalog_presentation(model), "supported": model in MODELS,
-                "supportDescription": "SDK 协议兼容，正在核验本地状态" if model in MODELS else "当前 SDK 不支持此型号协议",
+                "supportDescription": "SDK 协议兼容，正在核验本地状态" if model in MODELS else "此应用尚未适配该型号",
             })
             if model not in MODELS:
                 raise PairingError("unsupported_model")
@@ -405,6 +404,7 @@ class Worker:
             self.persist()
 
     def _write_level(self, level: int) -> bool:
+        validate_level(level, self.device_view["model"])
         previously_owned = self.owner
         fresh = self.poll_device()
         if previously_owned and not self.owner:
@@ -453,8 +453,7 @@ class Worker:
             return False
 
     def set_manual_purifier(self, level: Any) -> None:
-        if isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= 17:
-            raise ValueError("手动档位必须是 0 到 17 的整数")
+        validate_level(level, self.device_view["model"])
         if self.busy or self.test_session:
             raise ValueError("净化器正在试听或执行其他操作")
         if not self.account["paired"] or self.device is None:
@@ -907,6 +906,9 @@ class Worker:
         if self.mode == "enabled" or self.busy or self.owner:
             raise ValueError("启用或测试期间不能修改配置")
         new_config = Config.from_dict(value)
+        for level in (new_config.mediumLevel, new_config.highLevel):
+            if level is not None:
+                validate_level(level, self.device_view["model"])
         restart_sensor = new_config.sampleSeconds != self.config.sampleSeconds
         self.config = new_config
         self.history_session = uuid.uuid4().hex
@@ -925,8 +927,7 @@ class Worker:
             raise ValueError("试听档位必须是数组")
         normalized: list[int] = []
         for level in levels:
-            if isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= 17:
-                raise ValueError("试听档位必须是 0–17 的整数")
+            validate_level(level, self.device_view["model"])
             if level not in normalized:
                 normalized.append(level)
         if not normalized or len(normalized) > 2 or self.mode == "enabled" or self.busy or self.snapshot is not None:

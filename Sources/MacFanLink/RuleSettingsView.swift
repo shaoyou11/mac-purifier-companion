@@ -18,6 +18,8 @@ struct RuleSettingsView: View {
     @State private var showRenamePreset = false
     @State private var showDeletePreset = false
 
+    private var maxLevel: Int { controller.status?.device.maxLevel ?? 17 }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
@@ -74,7 +76,7 @@ struct RuleSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     timingFields
-                    Text("阈值关系：退出 < 中档 ≤ 降回中档 < 高档。两档等级都必须为 0–17 的整数，且中档低于高档。")
+                    Text("阈值关系：退出 < 中档 ≤ 降回中档 < 高档。两档等级都必须为 0–\(maxLevel) 的整数，且中档低于高档。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -327,8 +329,8 @@ struct RuleSettingsView: View {
             .frame(width: 232)
             Text(duration).frame(width: 58, alignment: .leading).foregroundStyle(.secondary)
             HStack(spacing: 6) {
-                if let levelValue, (0...17).contains(levelValue) {
-                    Slider(value: levelSliderBinding(level, current: levelValue), in: 0...17, step: 1)
+                if let levelValue, (0...maxLevel).contains(levelValue) {
+                    Slider(value: levelSliderBinding(level, current: levelValue), in: 0...Double(maxLevel), step: 1)
                         .accessibilityLabel("\(title)最爱等级")
                 } else {
                     invalidTrack("输入等级")
@@ -391,7 +393,7 @@ struct RuleSettingsView: View {
     }
 
     private var draftConfig: LinkConfig? {
-        if case let .success(config) = draft.validated() { return config }
+        if case let .success(config) = draft.validated(maxLevel: maxLevel) { return config }
         return nil
     }
 
@@ -400,7 +402,7 @@ struct RuleSettingsView: View {
     }
 
     private var validationMessage: String? {
-        if case let .failure(error) = draft.validated() { return error.localizedDescription }
+        if case let .failure(error) = draft.validated(maxLevel: maxLevel) { return error.localizedDescription }
         return nil
     }
 
@@ -505,7 +507,7 @@ struct RuleSettingsView: View {
     }
 
     private func changed() {
-        if case let .success(value) = draft.validated(), value == controller.status?.config {
+        if case let .success(value) = draft.validated(maxLevel: maxLevel), value == controller.status?.config {
             dirty = false
             message = nil
         } else {
@@ -530,7 +532,7 @@ struct RuleSettingsView: View {
             }
             return
         }
-        guard case let .success(value) = draft.validated() else {
+        guard case let .success(value) = draft.validated(maxLevel: maxLevel) else {
             message = validationMessage
             return
         }
@@ -649,6 +651,7 @@ struct RuleSettingsView: View {
         case "favorite": "最爱"
         case "auto": "自动"
         case "silent": "睡眠"
+        case "fan": "手动三档"
         case nil: "—"
         default: mode ?? "—"
         }

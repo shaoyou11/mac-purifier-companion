@@ -22,8 +22,7 @@ import uuid
 import keyring
 from keyring.backends.macOS import Keyring
 import requests
-from miio import AirPurifier
-from miio.integrations.airpurifier.zhimi.airpurifier import SUPPORTED_MODELS
+from purifier_protocol import AirPurifier, SUPPORTED_MODELS, max_level
 
 ROOT = Path(__file__).resolve().parents[1]
 RESOURCE_DIR = Path(os.environ.get("MACFANLINK_RESOURCE_DIR", ROOT / "Resources"))
@@ -101,7 +100,7 @@ def _device_record(raw: dict[str, Any]) -> dict[str, Any] | None:
         "model": model,
         "ip": ip,
         "supported": supported,
-        "reason": "SDK 协议兼容，仍需本地状态核验" if supported else "当前 SDK 不支持此型号协议",
+        "reason": "SDK 协议兼容，仍需本地状态核验" if supported else "此应用尚未适配该型号",
         "imageURL": None,
     }
 
@@ -284,7 +283,7 @@ def verify_candidate(metadata: dict[str, Any], token: str, *, purifier_factory: 
         raise PairingError("local_model_mismatch")
     status = purifier.status()
     level = status.favorite_level
-    if isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= 17:
+    if isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= max_level(model):
         raise PairingError("favorite_level_out_of_range")
     return {"firmware": info.firmware_version, "status": status, "purifier": purifier}
 

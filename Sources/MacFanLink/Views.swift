@@ -186,6 +186,7 @@ private struct DeviceHero: View {
         case "favorite": return device.level.map { "最爱等级 \($0) · RPM 仅为实时读数" } ?? "最爱模式"
         case "auto": return "设备自动模式 · 未固定转速"
         case "silent": return "睡眠模式"
+        case "fan": return "手动三档模式"
         case let mode?: return mode
         default: return "模式未知"
         }
@@ -553,6 +554,7 @@ struct DeviceCard: View {
         case "favorite": return device?.level.map { "最爱等级 \($0)" } ?? "最爱模式"
         case "auto": return "自动模式"
         case "silent": return "睡眠模式"
+        case "fan": return "手动三档模式"
         case "paused": return "已暂停"
         case let value?: return value
         default: return "模式未知"
