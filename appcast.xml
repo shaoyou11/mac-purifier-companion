@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+  <channel>
+    <title>Mac 净化器伴侣 · 个性化版本</title>
+    <item>
+      <title>v0.3.0-miot.5</title>
+      <pubDate>Sun, 11 Oct 2026 01:35:03 +0000</pubDate>
+      <sparkle:version>19</sparkle:version>
+      <sparkle:shortVersionString>0.3.0-miot.5</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description>新版已发布。安装后将自动重新启动，保留现有设置。</description>
+      <enclosure url="https://github.com/shaoyou11/mac-purifier-companion/releases/download/v0.3.0-miot.5/Mac-Purifier-Companion-0.3.0-miot.5-arm64.dmg" length="35454464" type="application/octet-stream" sparkle:edSignature="8a1WhHR9+rtjEYUFfdFXPjEfKCuLrKVwHj8Ca79A8fXfHxMrUyHexin2CyvWaOYZxLg1h7/3UNehOlGPO8PZAQ=="></enclosure>
+    </item>
+  </channel>
+</rss><!-- sparkle-signatures:
+edSignature: ty9Zb5ws4XgD2AnHR3JPgMHru4LAHHctd/Ec39Aju8wN0jpvbOPv30S58f86SB2tY+i/Zk3jrflvegNwg6lCBg==
+length: 1208
+-->
