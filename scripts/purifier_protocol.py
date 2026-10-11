@@ -52,8 +52,21 @@ class AirPurifier:
     def set_mode(self, mode):
         native_mode = MiotMode if self._miot else LegacyMode
         # Unknown modes fail closed instead of silently falling back to auto.
-        return self._device.set_mode(native_mode[mode.name])
+        return self._checked_write(self._device.set_mode(native_mode[mode.name]))
 
     def set_favorite_level(self, level):
         validate_level(level, self.model)
-        return self._device.set_favorite_level(level)
+        return self._checked_write(self._device.set_favorite_level(level))
+
+    def _checked_write(self, result):
+        # python-miio returns MIoT property errors without raising. Stop the
+        # command sequence on rejection; acceptance still needs worker readback.
+        if self._miot and not (
+            isinstance(result, list) and len(result) == 1
+            and isinstance(result[0], dict)
+            and type(result[0].get("code")) is int
+            and result[0]["code"] == 0
+        ):
+            # Never include the raw response: it can contain device identifiers.
+            raise RuntimeError("MIoT 写入被拒绝或响应无效")
+        return result

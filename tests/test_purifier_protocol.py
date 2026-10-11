@@ -29,10 +29,12 @@ class MiotDevice:
             raise TypeError("MIoT requires its own mode enum")
         self.writes.append(("mode", mode.value))
         self.mode = mode
+        return [{"code": 0}]
 
     def set_favorite_level(self, level):
         self.writes.append(("level", level))
         self.level = level
+        return [{"code": 0}]
 
 
 class ProtocolTests(unittest.TestCase):
@@ -72,6 +74,29 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             protocol.AirPurifier("192.0.2.1", "a" * 32, model="zhimi.airpurifier.unknown")
 
+    def test_miot_write_rejections_and_malformed_replies_fail_closed(self):
+        with patch.object(protocol, "AirPurifierMiot") as factory:
+            device = protocol.AirPurifier("192.0.2.1", "a" * 32, model=MODEL)
+            for result in ([{"code": -4004}], [], None, {}, [{}],
+                           [{"code": False}], [{"code": "0"}],
+                           [{"code": 0}, {"code": -1}]):
+                for method, action in (
+                    (factory.return_value.set_mode,
+                     lambda: device.set_mode(protocol.OperationMode.Favorite)),
+                    (factory.return_value.set_favorite_level,
+                     lambda: device.set_favorite_level(7)),
+                ):
+                    with self.subTest(result=result, method=method):
+                        method.return_value = result
+                        with self.assertRaisesRegex(RuntimeError, "MIoT 写入"):
+                            action()
+
+    def test_legacy_write_response_is_preserved(self):
+        with patch.object(protocol, "LegacyPurifier") as factory:
+            factory.return_value.set_favorite_level.return_value = ["ok"]
+            device = protocol.AirPurifier("192.0.2.1", "a" * 32, model="zhimi.airpurifier.m1")
+            self.assertEqual(device.set_favorite_level(17), ["ok"])
+
 
 class MiotWorkerTests(unittest.TestCase):
     def setUp(self):
@@ -103,6 +128,26 @@ class MiotWorkerTests(unittest.TestCase):
         self.assertFalse(self.worker.owner)
         self.assertEqual(self.worker.mode, "paused")
         self.assertIsNone(self.worker.snapshot)
+
+    def test_rejected_mode_change_stops_before_level_write(self):
+        native = self.worker.device._device
+        with patch.object(native, "set_mode", return_value=[{"code": -4004}]), \
+             patch.object(native, "set_favorite_level") as write_level:
+            with self.assertRaises(ValueError):
+                self.worker.set_manual_purifier(7)
+            write_level.assert_not_called()
+        self.assertFalse(self.worker.owner)
+        self.assertEqual(self.worker.mode, "paused")
+        self.assertEqual(self.worker.command_state, "unknown")
+
+    def test_accepted_write_still_requires_matching_readback(self):
+        native = self.worker.device._device
+        with patch.object(native, "set_mode", return_value=[{"code": 0}]), \
+             patch.object(native, "set_favorite_level", return_value=[{"code": 0}]):
+            with self.assertRaises(ValueError):
+                self.worker.set_manual_purifier(7)
+        self.assertFalse(self.worker.owner)
+        self.assertEqual(self.worker.command_state, "unknown")
 
     def test_out_of_range_rejected_before_mode_change(self):
         for action in (lambda: self.worker.set_manual_purifier(15),
