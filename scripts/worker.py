@@ -173,6 +173,9 @@ class Worker:
         self.running = True
         self.last_emit = 0.0
         self.last_device_poll = 0.0
+        self.device_failures = 0
+        self.next_device_reconnect = 0.0
+        self.device_reconnect_delay = 5.0
         self.status_dirty = True
         self.output_closed = False
         self.device_identity: str | None = None
@@ -304,7 +307,8 @@ class Worker:
             self.last_emit = now
             self.status_dirty = False
 
-    def connect_device(self) -> None:
+    def connect_device(self, *, reconcile_snapshot: bool = True) -> None:
+        self.last_device_poll = time.monotonic()
         try:
             metadata = json.loads(DEVICE_PATH.read_text())
             model = metadata.get("model")
@@ -332,13 +336,31 @@ class Worker:
             if info.model != model:
                 raise PairingError("local_model_mismatch")
             self.device_view.update({"firmware": info.firmware_version, "supportDescription": "本地型号与状态已核验"})
-            self.poll_device()
-            self._reconcile_cold_snapshot()
+            if self.poll_device() and reconcile_snapshot:
+                self._reconcile_cold_snapshot()
         except Exception as exception:
             self.device = None
             self.device_view["reachable"] = False
             self.reason = "净化器不可达、型号不支持或凭据无效"
             self.log(f"设备连接失败（{type(exception).__name__}）")
+
+    def maintain_device_connection(self) -> None:
+        """Retry reads with a fresh session, never replay a control command."""
+        now = time.monotonic()
+        self.last_device_poll = now
+        if self.pairing is not None:
+            return
+        if self.device is not None and self.device_failures < 3:
+            self.poll_device()
+            return
+        if now < self.next_device_reconnect or not DEVICE_PATH.is_file():
+            return
+        self.connect_device(reconcile_snapshot=False)
+        if not self.device_view["reachable"]:
+            self.next_device_reconnect = time.monotonic() + self.device_reconnect_delay
+            self.device_reconnect_delay = min(60.0, self.device_reconnect_delay * 2)
+        self.last_device_poll = time.monotonic()
+        self.status_dirty = True
 
     def poll_device(self, *, check_ownership: bool = True) -> bool:
         if not self.device:
@@ -352,10 +374,15 @@ class Worker:
                 "reachable": True, "power": status.is_on, "mode": mode,
                 "level": status.favorite_level, "rpm": status.motor_speed,
             })
-            self.device_observed_mono = self.last_device_poll
             self.last_device_poll = time.monotonic()
+            self.device_observed_mono = self.last_device_poll
+            self.device_failures = 0
+            self.next_device_reconnect = 0.0
+            self.device_reconnect_delay = 5.0
             if not was_reachable:
                 self._history_event("connection", "净化器已连接")
+                if self.mode == "paused" and self.manual_paused:
+                    self.reason = "净化器连接已恢复；控制保持暂停，请确认后重新启用"
             current = expected_device_state(status.is_on, mode, status.favorite_level)
             if check_ownership and self.owner and not still_owned(self.expected, current):
                 was_manual = self.mode == "manual"
@@ -372,9 +399,11 @@ class Worker:
             self.status_dirty = True
             return True
         except Exception as exception:
+            self.device_failures += 1
             if was_reachable:
                 self._history_event("connection", "净化器连接已中断")
             self.device_view["reachable"] = False
+            self.status_dirty = True
             self.reason = "净化器读取失败，已停止写入"
             self.log(f"设备读取失败（{type(exception).__name__}）")
             if self.owner:
@@ -1129,8 +1158,8 @@ class Worker:
             self.log(self.reason)
             self._history_event("stop", "联动已停止")
         elif op == "refresh":
-            if self.device is None:
-                self.connect_device()
+            if self.device is None or not self.device_view["reachable"]:
+                self.connect_device(reconcile_snapshot=False)
             else:
                 self.poll_device()
             self.reason = "状态已刷新" if self.device_view["reachable"] else "设备刷新失败"
@@ -1275,7 +1304,7 @@ class Worker:
             if self.test_session and self.test_session.get("deadline") is not None and time.monotonic() >= self.test_session["deadline"]:
                 self.finish_test()
             if time.monotonic() - self.last_device_poll >= max(5.0, self.config.sampleSeconds):
-                self.poll_device()
+                self.maintain_device_connection()
             if self._temperature_stale() and (not self.temperature["stale"] or self.owner):
                 self.temperature["stale"] = True
                 self._break_history_segment()
