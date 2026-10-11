@@ -71,7 +71,7 @@ class ReconnectionTests(unittest.TestCase):
                 subject.maintain_device_connection()
             self.assertEqual(subject.device_reconnect_delay, 60)
 
-    def test_disconnect_pauses_enabled_control_before_takeover(self):
+    def test_disconnect_preserves_automatic_intent_before_takeover(self):
         subject = self.subject
         subject.mode = "enabled"
         subject.intent_enabled = True
@@ -79,10 +79,11 @@ class ReconnectionTests(unittest.TestCase):
         with patch.object(subject.device, "status", side_effect=OSError()):
             self.assertFalse(subject.poll_device())
         self.assertEqual(subject.mode, "paused")
-        self.assertTrue(subject.manual_paused)
+        self.assertFalse(subject.manual_paused)
+        self.assertTrue(subject.reconnect_pending)
         self.assertFalse(subject.owner)
 
-    def test_failed_startup_does_not_resume_saved_enabled_mode(self):
+    def test_failed_startup_keeps_automatic_resume_pending(self):
         subject = self.subject
         subject.mode = "enabled"
         subject.intent_enabled = True
@@ -90,7 +91,8 @@ class ReconnectionTests(unittest.TestCase):
              patch.object(worker, "AirPurifier", side_effect=OSError()):
             subject.connect_device()
         self.assertEqual(subject.mode, "paused")
-        self.assertTrue(subject.manual_paused)
+        self.assertFalse(subject.manual_paused)
+        self.assertTrue(subject.reconnect_pending)
 
     def test_unpaired_or_pairing_does_not_reconnect(self):
         with patch.object(self.subject, "connect_device") as connect:
@@ -112,3 +114,125 @@ class ReconnectionTests(unittest.TestCase):
         self.assertEqual(subject.device_reconnect_delay, 5)
         self.assertEqual(subject.next_device_reconnect, 0)
         self.assertEqual(subject.device_observed_mono, 150)
+
+    def ready_for_resume(self):
+        from dataclasses import replace
+        subject = self.subject
+        subject.config = replace(subject.config, mediumLevel=6, highLevel=10)
+        subject.verified = {6, 10}
+        subject.device = test_worker.FakePurifier()
+        subject.mode = "enabled"
+        subject.intent_enabled = True
+        subject.sensor_received_mono = worker.time.monotonic()
+        subject.sensor_source_wall = worker.time.time()
+        return subject
+
+    def test_reconnect_resumes_auto_without_immediate_write(self):
+        subject = self.ready_for_resume()
+        with patch.object(subject.device, "status", side_effect=OSError()):
+            subject.poll_device()
+        subject.poll_device()
+        self.assertEqual(subject.mode, "enabled")
+        self.assertFalse(subject.reconnect_pending)
+        self.assertFalse(subject.manual_paused)
+        self.assertEqual(subject.device.writes, [])
+
+    def test_resume_waits_for_temperature_then_sensor_resumes(self):
+        subject = self.ready_for_resume()
+        subject._pause_disconnected_control()
+        subject.sensor_received_mono = None
+        subject.poll_device()
+        self.assertEqual(subject.mode, "paused")
+        self.assertTrue(subject.reconnect_pending)
+        subject.handle_sensor({"timestamp": worker.time.time(), "temp": {"cpu_temp_avg": 56}})
+        self.assertEqual(subject.mode, "enabled")
+        self.assertEqual(subject.device.writes, [])
+
+    def test_manual_pause_during_outage_is_persisted_and_never_resumes(self):
+        subject = self.ready_for_resume()
+        subject._pause_disconnected_control()
+        subject.handle_command({"op": "pause"})
+        subject.poll_device()
+        self.assertEqual(subject.mode, "paused")
+        restored = worker.Worker()
+        self.assertTrue(restored.manual_paused)
+        self.assertFalse(restored.reconnect_pending)
+
+    def test_restart_during_outage_retains_pending_intent(self):
+        subject = self.ready_for_resume()
+        subject._pause_disconnected_control()
+        restored = worker.Worker()
+        self.assertTrue(restored.reconnect_pending)
+        self.assertFalse(restored.manual_paused)
+        self.assertTrue(restored.intent_enabled)
+
+    def test_owned_state_rechecked_and_restored_without_replaying_commands(self):
+        subject = self.ready_for_resume()
+        subject.snapshot = {"power": True, "mode": "favorite", "level": 6}
+        subject.expected = {"power": True, "mode": "favorite", "level": 9}
+        subject.owner = True
+        subject._pause_disconnected_control()
+        subject.poll_device()
+        self.assertTrue(subject.owner)
+        self.assertEqual(subject.mode, "enabled")
+        self.assertEqual(subject.device.writes, [])
+
+    def test_external_change_during_outage_is_not_overwritten(self):
+        subject = self.ready_for_resume()
+        subject.snapshot = {"power": True, "mode": "favorite", "level": 6}
+        subject.expected = {"power": True, "mode": "favorite", "level": 10}
+        subject.owner = True
+        subject._pause_disconnected_control()
+        subject.poll_device()
+        self.assertEqual(subject.mode, "paused")
+        self.assertTrue(subject.manual_paused)
+        self.assertFalse(subject.reconnect_pending)
+        self.assertEqual(subject.device.writes, [])
+
+    def test_uncertain_write_and_unverified_levels_do_not_resume(self):
+        subject = self.ready_for_resume()
+        subject._pause_disconnected_control()
+        subject.command_state = "unknown"
+        subject.poll_device()
+        self.assertEqual(subject.mode, "paused")
+        subject.command_state = "none"
+        subject.verified = set()
+        subject.poll_device()
+        self.assertEqual(subject.mode, "paused")
+        self.assertEqual(subject.device.writes, [])
+
+    def test_startup_reconnect_resumes_after_fresh_sensor_sample(self):
+        subject = self.ready_for_resume()
+        subject.persist()
+        restored = worker.Worker()
+        device = test_worker.FakePurifier()
+        with patch.object(worker, "read_token", return_value="a" * 32), \
+             patch.object(worker, "AirPurifier", side_effect=[OSError(), device]):
+            restored.connect_device()
+            restored.maintain_device_connection()
+        self.assertEqual(restored.mode, "paused")
+        restored.handle_sensor({"timestamp": worker.time.time(), "temp": {"cpu_temp_avg": 80}})
+        self.assertEqual(restored.mode, "enabled")
+        self.assertEqual(device.writes, [])
+        self.assertTrue(all(row["elapsed"] == 0 for row in restored.rule.dwell()))
+
+    def test_powered_off_device_waits_without_turning_it_on(self):
+        subject = self.ready_for_resume()
+        subject._pause_disconnected_control()
+        subject.device.power = False
+        subject.poll_device()
+        self.assertEqual(subject.mode, "paused")
+        self.assertTrue(subject.reconnect_pending)
+        self.assertEqual(subject.device.writes, [])
+        subject.device.power = True
+        subject.poll_device()
+        self.assertEqual(subject.mode, "enabled")
+
+    def test_stop_during_outage_cancels_automatic_resume(self):
+        subject = self.ready_for_resume()
+        subject._pause_disconnected_control()
+        subject.handle_command({"op": "stop"})
+        subject.poll_device()
+        self.assertEqual(subject.mode, "stopped")
+        self.assertFalse(subject.intent_enabled)
+        self.assertFalse(worker.Worker().reconnect_pending)

@@ -137,6 +137,7 @@ class Worker:
         self.verified: set[int] = set()
         self.intent_enabled = False
         self.manual_paused = False
+        self.reconnect_pending = False
         self.snapshot: dict[str, Any] | None = None
         self.expected: dict[str, Any] | None = None
         self.owner = False
@@ -218,13 +219,14 @@ class Worker:
             self.verified = {int(x) for x in data.get("verifiedLevels", []) if isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= 17}
             self.intent_enabled = data.get("intentEnabled") is True
             self.manual_paused = data.get("manualPaused") is True
+            self.reconnect_pending = data.get("reconnectPending") is True
             self.snapshot = data.get("snapshot") if isinstance(data.get("snapshot"), dict) else None
             self.expected = data.get("expected") if isinstance(data.get("expected"), dict) else None
             if self.manual_paused:
                 self.mode = "paused"
                 self.reason = "人工暂停已保留，需要显式恢复"
             elif self.intent_enabled:
-                self.mode = "enabled"
+                self.mode = "paused" if self.reconnect_pending else "enabled"
                 self.reason = "正在重新核对设备并等待新鲜温度"
             else:
                 saved_mode = data.get("mode")
@@ -240,6 +242,7 @@ class Worker:
         _atomic_json(STATE_PATH, {
             "version": 2, "deviceIdentity": self.device_identity, "config": self.config.to_dict(), "verifiedLevels": sorted(self.verified),
             "intentEnabled": self.intent_enabled, "manualPaused": self.manual_paused,
+            "reconnectPending": self.reconnect_pending and self.intent_enabled and not self.manual_paused,
             "mode": self.mode, "snapshot": self.snapshot, "expected": self.expected,
         })
 
@@ -347,11 +350,48 @@ class Worker:
 
     def _pause_disconnected_control(self) -> None:
         if self.owner or self.mode in ("enabled", "manual"):
+            # Connectivity loss is not a user pause. Preserve automatic intent,
+            # but never resume manual speed commands or an uncertain write.
+            automatic = self.mode == "enabled" and self.intent_enabled and not self.manual_paused
+            self.reconnect_pending = automatic
             self.mode = "paused"
-            self.manual_paused = True
+            self.manual_paused = not automatic
             self.owner = False
             self.rule.reset_dwell()
+            if automatic:
+                self.reason = "设备暂时离线，连接恢复并核验后将自动恢复联动"
             self.persist()
+
+    def _resume_reconnected_control(self) -> None:
+        if not (self.reconnect_pending and self.intent_enabled and not self.manual_paused):
+            return
+        if self.busy or not self.device_view["reachable"] or self.device_view["power"] is not True:
+            return
+        if self.command_state == "unknown":
+            return
+        if self.snapshot is not None:
+            if not self.expected or not still_owned(self.expected, self._current_state()):
+                self.snapshot = self.expected = None
+                self.reconnect_pending = False
+                self.manual_paused = True
+                self.reason = "离线期间设备状态已变化，联动保持暂停"
+                self.persist()
+                return
+        levels = (self.config.mediumLevel, self.config.highLevel)
+        if self._temperature_stale() or not all(
+            level is not None and 0 <= level <= max_level(self.device_view["model"]) and level in self.verified
+            for level in levels
+        ) or levels[0] >= levels[1]:
+            self.reason = "设备已连接，等待有效温度和已验证档位后恢复联动"
+            return
+        self.owner = self.snapshot is not None
+        self.reconnect_pending = False
+        self.mode = "enabled"
+        self.rule = RuleEngine(self.config)
+        self.reason = "连接已恢复，自动联动已恢复，温度持续计时重新开始"
+        self.persist()
+        self.log(self.reason)
+        self._history_event("enable", "重连后自动恢复联动")
 
     def maintain_device_connection(self) -> None:
         """Retry reads with a fresh session, never replay a control command."""
@@ -405,6 +445,7 @@ class Worker:
                 self.reason = "检测到人工修改，联动已暂停"
                 self.log(self.reason)
                 self.persist()
+            self._resume_reconnected_control()
             self.status_dirty = True
             return True
         except Exception as exception:
@@ -742,6 +783,7 @@ class Worker:
         self.temperature = {"cpu": cpu, "gpu": gpu, "cpuLoad": cpu_load, "timestamp": timestamp, "stale": False}
         stale = self._temperature_stale()
         self.temperature["stale"] = stale
+        self._resume_reconnected_control()
         if stale:
             self.rule.reset_dwell()
             self._break_history_segment()
@@ -1125,6 +1167,7 @@ class Worker:
             self.mode = "enabled"
             self.intent_enabled = True
             self.manual_paused = False
+            self.reconnect_pending = False
             self.rule = RuleEngine(self.config)
             self.reason = "联动已启用，等待连续温度条件"
             self.persist()
@@ -1308,7 +1351,8 @@ class Worker:
                 pass
             if self.test_session and self.test_session.get("deadline") is not None and time.monotonic() >= self.test_session["deadline"]:
                 self.finish_test()
-            if time.monotonic() - self.last_device_poll >= max(5.0, self.config.sampleSeconds):
+            poll_interval = max(5.0, self.config.sampleSeconds) if self.device_view["reachable"] else 5.0
+            if time.monotonic() - self.last_device_poll >= poll_interval:
                 self.maintain_device_connection()
             if self._temperature_stale() and (not self.temperature["stale"] or self.owner):
                 self.temperature["stale"] = True
