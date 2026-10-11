@@ -250,3 +250,17 @@ class ReconnectionTests(unittest.TestCase):
         self.assertFalse(restored.manual_paused)
         self.assertEqual(restored.snapshot["level"], 6)
         self.assertEqual(subject.device.writes, [])
+
+    def test_reconnected_high_phase_can_cool_down_after_new_dwell(self):
+        subject = self.ready_for_resume()
+        subject.device.level = 10
+        subject.snapshot = {"power": True, "mode": "favorite", "level": 6}
+        subject.expected = {"power": True, "mode": "favorite", "level": 10}
+        subject.owner = True
+        subject._pause_disconnected_control()
+        subject.poll_device()
+        self.assertEqual(subject.rule.phase, "high")
+        self.assertIsNone(subject.rule.update(50, 100))
+        decision = subject.rule.update(50, 100 + subject.config.fallSeconds)
+        self.assertEqual(decision.target, "standby")
+        self.assertEqual(subject.device.writes, [])

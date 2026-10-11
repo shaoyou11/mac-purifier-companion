@@ -387,7 +387,12 @@ class Worker:
         self.owner = self.snapshot is not None
         self.reconnect_pending = False
         self.mode = "enabled"
-        self.rule = RuleEngine(self.config)
+        # Keep the verified control phase so cooling can still restore the old
+        # device state; only the dwell timers restart after an outage.
+        phase = "standby"
+        if self.owner:
+            phase = "high" if self.device_view["level"] >= self.config.highLevel else "medium"
+        self.rule = RuleEngine(self.config, phase=phase)
         self.reason = "连接已恢复，自动联动已恢复，温度持续计时重新开始"
         self.persist()
         self.log(self.reason)
