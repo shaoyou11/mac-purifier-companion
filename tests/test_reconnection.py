@@ -236,3 +236,17 @@ class ReconnectionTests(unittest.TestCase):
         self.assertEqual(subject.mode, "stopped")
         self.assertFalse(subject.intent_enabled)
         self.assertFalse(worker.Worker().reconnect_pending)
+
+    def test_shutdown_while_owned_device_offline_keeps_resume_intent(self):
+        subject = self.ready_for_resume()
+        subject.snapshot = {"power": True, "mode": "favorite", "level": 6}
+        subject.expected = {"power": True, "mode": "favorite", "level": 9}
+        subject.owner = True
+        with patch.object(subject.device, "status", side_effect=OSError()):
+            subject.poll_device()
+            subject.shutdown(preserve_intent=True)
+        restored = worker.Worker()
+        self.assertTrue(restored.reconnect_pending)
+        self.assertFalse(restored.manual_paused)
+        self.assertEqual(restored.snapshot["level"], 6)
+        self.assertEqual(subject.device.writes, [])

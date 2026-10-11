@@ -1281,7 +1281,9 @@ class Worker:
         self.cancel_pairing(quiet=True)
         if self.test_session:
             self.finish_test(interrupted=True)
-        if self.snapshot is not None:
+        waiting_for_reconnect = (self.reconnect_pending and self.intent_enabled
+                                 and not self.manual_paused and not self.device_view["reachable"])
+        if self.snapshot is not None and not waiting_for_reconnect:
             self._restore("退出前恢复")
         if not preserve_intent:
             self.intent_enabled = False
