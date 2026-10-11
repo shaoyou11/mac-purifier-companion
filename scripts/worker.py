@@ -175,6 +175,9 @@ class Worker:
         self.last_emit = 0.0
         self.last_device_poll = 0.0
         self.device_failures = 0
+        self.connection_reported = False
+        self.outage_reported = False
+        self.system_sleeping = False
         self.next_device_reconnect = 0.0
         self.device_reconnect_delay = 5.0
         self.status_dirty = True
@@ -311,6 +314,8 @@ class Worker:
             self.status_dirty = False
 
     def connect_device(self, *, reconcile_snapshot: bool = True) -> None:
+        if self.system_sleeping:
+            return
         self.last_device_poll = time.monotonic()
         try:
             metadata = json.loads(DEVICE_PATH.read_text())
@@ -344,9 +349,7 @@ class Worker:
         except Exception as exception:
             self.device = None
             self.device_view["reachable"] = False
-            self.reason = "净化器不可达、型号不支持或凭据无效"
-            self.log(f"设备连接失败（{type(exception).__name__}）")
-            self._pause_disconnected_control()
+            self._device_read_failed(exception)
 
     def _pause_disconnected_control(self) -> None:
         if self.owner or self.mode in ("enabled", "manual"):
@@ -402,9 +405,9 @@ class Worker:
         """Retry reads with a fresh session, never replay a control command."""
         now = time.monotonic()
         self.last_device_poll = now
-        if self.pairing is not None:
+        if self.pairing is not None or self.system_sleeping:
             return
-        if self.device is not None and self.device_failures < 3:
+        if self.device is not None and self.device_failures == 0:
             self.poll_device()
             return
         if now < self.next_device_reconnect or not DEVICE_PATH.is_file():
@@ -417,7 +420,7 @@ class Worker:
         self.status_dirty = True
 
     def poll_device(self, *, check_ownership: bool = True) -> bool:
-        if not self.device:
+        if self.system_sleeping or not self.device:
             return False
         self.last_device_poll = time.monotonic()
         was_reachable = self.device_view["reachable"]
@@ -433,8 +436,11 @@ class Worker:
             self.device_failures = 0
             self.next_device_reconnect = 0.0
             self.device_reconnect_delay = 5.0
-            if not was_reachable:
+            if not self.connection_reported or self.outage_reported:
                 self._history_event("connection", "净化器已连接")
+                self.connection_reported = True
+                self.outage_reported = False
+            if not was_reachable:
                 if self.mode == "paused" and self.manual_paused:
                     self.reason = "净化器连接已恢复；控制保持暂停，请确认后重新启用"
             current = expected_device_state(status.is_on, mode, status.favorite_level)
@@ -454,15 +460,44 @@ class Worker:
             self.status_dirty = True
             return True
         except Exception as exception:
-            self.device_failures += 1
-            if was_reachable:
-                self._history_event("connection", "净化器连接已中断")
-            self.device_view["reachable"] = False
-            self.status_dirty = True
-            self.reason = "净化器读取失败，已停止写入"
-            self.log(f"设备读取失败（{type(exception).__name__}）")
-            self._pause_disconnected_control()
+            self._device_read_failed(exception)
             return False
+
+    def _device_read_failed(self, exception: Exception) -> None:
+        self.device_failures += 1
+        if self.connection_reported and self.device_failures >= 3 and not self.outage_reported:
+            self._history_event("connection", "净化器连续读取失败，连接已中断")
+            self.outage_reported = True
+        # Even one failed read stops writes; only the history notification is debounced.
+        self.device_view["reachable"] = False
+        self.status_dirty = True
+        self.reason = "净化器读取暂时失败，等待重新连接"
+        self.log(f"设备读取失败（{type(exception).__name__}），将重建连接")
+        self._pause_disconnected_control()
+
+    def handle_system_power(self, sleeping: bool) -> None:
+        if sleeping and self.system_sleeping:
+            return
+        self.system_sleeping = sleeping
+        self.rule.reset_dwell()
+        self.last_wall = self.last_mono = None
+        self.sensor_received_mono = None
+        self.system_received_mono = None
+        self.temperature["stale"] = self.system["stale"] = True
+        self._break_history_segment()
+        if sleeping:
+            self._pause_disconnected_control()
+            self.reason = "macOS 已通知系统即将休眠，联动等待唤醒"
+            self._history_event("sleep", "macOS 系统即将休眠", device=False)
+        else:
+            self.device = None
+            self.next_device_reconnect = self.last_device_poll = 0.0
+            self.device_reconnect_delay = 5.0
+            self.reason = "macOS 已通知系统唤醒，等待重新连接及新鲜采样"
+            self._history_event("wake", "macOS 系统已唤醒", device=False)
+        self.device_view["reachable"] = False
+        self.log(self.reason)
+        self.status_dirty = True
 
     def _current_state(self) -> dict[str, Any]:
         return expected_device_state(bool(self.device_view["power"]), self.device_view["mode"], self.device_view["level"])
@@ -730,6 +765,8 @@ class Worker:
         self.last_history_signature = None
 
     def handle_sensor(self, payload: Any) -> None:
+        if self.system_sleeping:
+            return
         now_mono, now_wall = time.monotonic(), time.time()
         cpu = gpu = cpu_load = timestamp = None
         gpu_load = None
@@ -771,8 +808,10 @@ class Worker:
             if mono_step < 0 or abs(wall_step - mono_step) > 2.0 or mono_step > max(6.0, HOST_SAMPLE_SECONDS * 3.0):
                 self.rule.reset_dwell()
                 self._break_history_segment()
-                self._history_event("wake", "Mac 已从休眠或时钟跳变中恢复", device=False)
-                self.log("检测到休眠或时钟跳变，已重置持续计时")
+                if mono_step < 0 or abs(wall_step - mono_step) > 2.0:
+                    self.log("检测到时钟变化，已重置持续计时（不代表系统休眠）")
+                else:
+                    self.log(f"采样处理间隔 {mono_step:.0f} 秒，已重置持续计时（可能为采样延迟或后台阻塞）")
         self.last_wall, self.last_mono = now_wall, now_mono
 
         if cpu is None or timestamp is None:
@@ -1162,7 +1201,9 @@ class Worker:
         if not isinstance(command, dict) or not isinstance(command.get("op"), str):
             raise ValueError("命令格式无效")
         op = command["op"]
-        if op == "configure":
+        if op in ("systemSleep", "systemWake"):
+            self.handle_system_power(op == "systemSleep")
+        elif op == "configure":
             self.configure(command.get("config"))
         elif op == "enable":
             if self.mode == "manual":
@@ -1361,7 +1402,7 @@ class Worker:
             poll_interval = max(5.0, self.config.sampleSeconds) if self.device_view["reachable"] else 5.0
             if time.monotonic() - self.last_device_poll >= poll_interval:
                 self.maintain_device_connection()
-            if self._temperature_stale() and (not self.temperature["stale"] or self.owner):
+            if not self.system_sleeping and self._temperature_stale() and (not self.temperature["stale"] or self.owner):
                 self.temperature["stale"] = True
                 self._break_history_segment()
                 self.rule.reset_dwell()

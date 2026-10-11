@@ -19,7 +19,7 @@ MAX_QUERY_SAMPLES = 150_000
 MAX_EVENTS = 200
 MIN_COMPARISON_SECONDS = 300.0
 MIN_COVERAGE = 0.8
-EVENT_KINDS = frozenset({"enable", "pause", "stop", "takeover", "restore", "manual", "wake", "connection"})
+EVENT_KINDS = frozenset({"enable", "pause", "stop", "takeover", "restore", "manual", "sleep", "wake", "connection"})
 
 
 @dataclass(frozen=True)

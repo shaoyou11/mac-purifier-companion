@@ -135,6 +135,10 @@ final class WorkerController {
     func pause() { send(WorkerCommand(op: "pause")) }
     func stop() { send(WorkerCommand(op: "stop")) }
     func refresh() { send(WorkerCommand(op: "refresh")) }
+    func systemPowerChanged(sleeping: Bool) {
+        guard connected, !shutdownRequested else { return }
+        send(WorkerCommand(op: sleeping ? "systemSleep" : "systemWake"), presentFeedback: false)
+    }
     func setManualPurifier(level: Int) { send(WorkerCommand(op: "manualPurifier", level: level)) }
     func releaseManualPurifier() { send(WorkerCommand(op: "releaseManualPurifier")) }
     func clearHistory() { send(WorkerCommand(op: "clearHistory")) }

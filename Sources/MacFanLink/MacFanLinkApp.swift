@@ -32,8 +32,19 @@ struct MacFanLinkApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let center = NSWorkspace.shared.notificationCenter
+        center.addObserver(self, selector: #selector(systemWillSleep), name: NSWorkspace.willSleepNotification, object: nil)
+        center.addObserver(self, selector: #selector(systemDidWake), name: NSWorkspace.didWakeNotification, object: nil)
         WorkerController.shared.start()
         AppUpdater.shared.start()
+    }
+
+    @objc private func systemWillSleep(_ notification: Notification) {
+        WorkerController.shared.systemPowerChanged(sleeping: true)
+    }
+
+    @objc private func systemDidWake(_ notification: Notification) {
+        WorkerController.shared.systemPowerChanged(sleeping: false)
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

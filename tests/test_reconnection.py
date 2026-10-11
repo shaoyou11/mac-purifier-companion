@@ -264,3 +264,70 @@ class ReconnectionTests(unittest.TestCase):
         decision = subject.rule.update(50, 100 + subject.config.fallSeconds)
         self.assertEqual(decision.target, "standby")
         self.assertEqual(subject.device.writes, [])
+
+    def test_transient_failure_rebuilds_session_without_history_flapping(self):
+        subject = self.ready_for_resume()
+        subject.poll_device()
+        with patch.object(subject, "_history_event") as event:
+            with patch.object(subject.device, "status", side_effect=OSError()):
+                subject.poll_device()
+            fresh = test_worker.FakePurifier()
+            with patch.object(worker, "read_token", return_value="a" * 32), patch.object(worker, "AirPurifier", return_value=fresh):
+                subject.maintain_device_connection()
+            self.assertIs(subject.device, fresh)
+            self.assertEqual(subject.mode, "enabled")
+            self.assertFalse(any(call.args[0] == "connection" for call in event.call_args_list))
+            self.assertEqual(fresh.writes, [])
+
+    def test_sustained_failure_records_one_outage_and_one_recovery(self):
+        subject = self.ready_for_resume()
+        subject.poll_device()
+        with patch.object(subject, "_history_event") as event:
+            with patch.object(subject.device, "status", side_effect=OSError()):
+                for _ in range(4):
+                    subject.poll_device()
+            subject.poll_device()
+            connections = [call for call in event.call_args_list if call.args[0] == "connection"]
+            self.assertEqual(len(connections), 2)
+
+    def test_real_sleep_blocks_reads_and_wake_rebuilds_session(self):
+        subject = self.ready_for_resume()
+        subject.poll_device()
+        with patch.object(subject, "_history_event") as event:
+            subject.handle_command({"op": "systemSleep"})
+            with patch.object(subject.device, "status") as read:
+                self.assertFalse(subject.poll_device())
+                subject.maintain_device_connection()
+                read.assert_not_called()
+            self.assertTrue(subject.reconnect_pending)
+            subject.handle_command({"op": "systemWake"})
+            self.assertIsNone(subject.device)
+            self.assertEqual(subject.next_device_reconnect, 0)
+            self.assertTrue(subject.temperature["stale"])
+            self.assertEqual([call.args[0] for call in event.call_args_list], ["sleep", "wake"])
+
+    def test_real_sleep_preserves_manual_pause(self):
+        subject = self.ready_for_resume()
+        subject.handle_command({"op": "pause"})
+        subject.handle_system_power(True)
+        subject.handle_system_power(False)
+        self.assertTrue(subject.manual_paused)
+        self.assertEqual(subject.mode, "paused")
+
+    def test_sampling_gap_is_not_reported_as_sleep(self):
+        subject = self.subject
+        subject.last_mono = 100
+        subject.last_wall = 1000
+        with patch.object(worker.time, "monotonic", return_value=112), patch.object(worker.time, "time", return_value=1012), patch.object(subject, "_history_event") as event:
+            subject.handle_sensor({"timestamp": 1012, "temp": {"cpu_temp_avg": 56}})
+            self.assertFalse(any(call.args[0] in ("sleep", "wake") for call in event.call_args_list))
+        self.assertTrue(any("采样处理间隔" in log for log in subject.logs))
+
+    def test_clock_change_is_not_reported_as_sleep(self):
+        subject = self.subject
+        subject.last_mono = 100
+        subject.last_wall = 1000
+        with patch.object(worker.time, "monotonic", return_value=102), patch.object(worker.time, "time", return_value=1032), patch.object(subject, "_history_event") as event:
+            subject.handle_sensor({"timestamp": 1032, "temp": {"cpu_temp_avg": 56}})
+            self.assertFalse(any(call.args[0] in ("sleep", "wake") for call in event.call_args_list))
+        self.assertTrue(any("时钟变化" in log for log in subject.logs))
