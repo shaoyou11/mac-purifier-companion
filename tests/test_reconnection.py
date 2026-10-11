@@ -71,6 +71,27 @@ class ReconnectionTests(unittest.TestCase):
                 subject.maintain_device_connection()
             self.assertEqual(subject.device_reconnect_delay, 60)
 
+    def test_disconnect_pauses_enabled_control_before_takeover(self):
+        subject = self.subject
+        subject.mode = "enabled"
+        subject.intent_enabled = True
+        subject.device = test_worker.FakePurifier()
+        with patch.object(subject.device, "status", side_effect=OSError()):
+            self.assertFalse(subject.poll_device())
+        self.assertEqual(subject.mode, "paused")
+        self.assertTrue(subject.manual_paused)
+        self.assertFalse(subject.owner)
+
+    def test_failed_startup_does_not_resume_saved_enabled_mode(self):
+        subject = self.subject
+        subject.mode = "enabled"
+        subject.intent_enabled = True
+        with patch.object(worker, "read_token", return_value="a" * 32), \
+             patch.object(worker, "AirPurifier", side_effect=OSError()):
+            subject.connect_device()
+        self.assertEqual(subject.mode, "paused")
+        self.assertTrue(subject.manual_paused)
+
     def test_unpaired_or_pairing_does_not_reconnect(self):
         with patch.object(self.subject, "connect_device") as connect:
             with patch.object(worker, "DEVICE_PATH", worker.LOCAL / "absent.json"):

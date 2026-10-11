@@ -343,6 +343,15 @@ class Worker:
             self.device_view["reachable"] = False
             self.reason = "净化器不可达、型号不支持或凭据无效"
             self.log(f"设备连接失败（{type(exception).__name__}）")
+            self._pause_disconnected_control()
+
+    def _pause_disconnected_control(self) -> None:
+        if self.owner or self.mode in ("enabled", "manual"):
+            self.mode = "paused"
+            self.manual_paused = True
+            self.owner = False
+            self.rule.reset_dwell()
+            self.persist()
 
     def maintain_device_connection(self) -> None:
         """Retry reads with a fresh session, never replay a control command."""
@@ -406,11 +415,7 @@ class Worker:
             self.status_dirty = True
             self.reason = "净化器读取失败，已停止写入"
             self.log(f"设备读取失败（{type(exception).__name__}）")
-            if self.owner:
-                self.mode = "paused"
-                self.manual_paused = True
-                self.owner = False
-                self.persist()
+            self._pause_disconnected_control()
             return False
 
     def _current_state(self) -> dict[str, Any]:
