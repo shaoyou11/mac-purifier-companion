@@ -10,18 +10,18 @@ struct PurifierManualControlView: View {
     private var maxLevel: Int { controller.status?.device.maxLevel ?? 17 }
 
     var body: some View {
-        ContentSection(
+        ControlPanel(
             title: controller.status?.account.paired == true ? controller.status?.device.productTitle ?? "净化器风量" : "净化器风量",
-            subtitle: "手动可选 0–\(maxLevel) 整数档位；实际 RPM 来自设备回读，不是设定值"
+            subtitle: "0–\(maxLevel) 档精细调节 · 转速以设备回读为准",
+            symbol: "air.purifier"
         ) {
             VStack(alignment: .leading, spacing: 18) {
-                modeControls
-
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    MetricView(title: "设备实际转速", value: actualRPM, prominent: true)
+                    MetricView(title: "实测转速", value: actualRPM, prominent: true)
                     MetricView(title: "当前状态", value: stateTitle)
                 }
-
+                Divider()
+                modeControls
                 manualSpeedControl
 
                 if shouldOfferRestore {
@@ -61,7 +61,7 @@ struct PurifierManualControlView: View {
 
     private var modeControls: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("控制方式").font(.subheadline.weight(.medium))
+            Text("控制方式").font(.caption.weight(.medium)).foregroundStyle(.secondary)
             HStack(spacing: 10) {
                 modeButton(
                     title: "自动联动",
@@ -98,25 +98,38 @@ struct PurifierManualControlView: View {
                     .monospacedDigit()
             }
 
-            Slider(
-                value: Binding(
-                    get: { draftLevel },
-                    set: { draftLevel = $0; if draggingSlider { dragChanged = true } }
-                ),
-                in: 0...Double(maxLevel),
-                step: 1
-            ) { editing in
-                if editing {
-                    draggingSlider = true
-                    dragChanged = false
-                } else {
-                    draggingSlider = false
-                    applyDragIfNeeded()
+            HStack(spacing: 12) {
+                Button {
+                    draftLevel = Double(max(0, selectedLevel - 1))
+                } label: { Image(systemName: "minus") }
+                .accessibilityLabel("预选档位减一")
+                .disabled(!canWrite || selectedLevel == 0)
+                Slider(
+                    value: Binding(
+                        get: { draftLevel },
+                        set: { draftLevel = $0; if draggingSlider { dragChanged = true } }
+                    ),
+                    in: 0...Double(maxLevel),
+                    step: 1
+                ) { editing in
+                    if editing {
+                        draggingSlider = true
+                        dragChanged = false
+                    } else {
+                        draggingSlider = false
+                        applyDragIfNeeded()
+                    }
                 }
+                .disabled(!canWrite)
+                .accessibilityLabel("净化器手动档位")
+                .accessibilityValue("最爱 \(selectedLevel) 档")
+                Button {
+                    draftLevel = Double(min(maxLevel, selectedLevel + 1))
+                } label: { Image(systemName: "plus") }
+                .accessibilityLabel("预选档位加一")
+                .disabled(!canWrite || selectedLevel == maxLevel)
             }
-            .disabled(!canWrite)
-            .accessibilityLabel("净化器手动档位")
-            .accessibilityValue("最爱 \(selectedLevel) 档")
+            .controlSize(.small)
 
             HStack {
                 Text("低档 0")
@@ -133,8 +146,8 @@ struct PurifierManualControlView: View {
 
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(activeMode == .manual
-                     ? "拖动只修改预览；松手后应用一次。键盘调整后请点“应用档位”。"
-                     : "先选择档位，再点“手动风速”显式进入手动控制。")
+                     ? "拖动松手后应用一次；使用加减按钮或键盘调整后，请点“应用档位”。"
+                     : "先预选档位，再点“手动风速”应用。预选不会改变设备。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 8)
@@ -171,7 +184,7 @@ struct PurifierManualControlView: View {
                 }
             }
             .padding(12)
-            .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .background(selected ? Color.accentColor.opacity(0.10) : Color(nsColor: .controlBackgroundColor))
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay {
@@ -181,6 +194,7 @@ struct PurifierManualControlView: View {
         }
         .buttonStyle(.plain)
         .disabled(!enabled || controller.pendingOperation != nil)
+        .opacity(enabled ? 1 : 0.55)
     }
 
     private enum ActiveMode {

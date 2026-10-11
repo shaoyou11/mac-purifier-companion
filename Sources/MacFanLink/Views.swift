@@ -13,7 +13,7 @@ struct SettingsView: View {
                     Label("趋势", systemImage: "chart.xyaxis.line").tag(SettingsPage.history)
                 }
                 Section("控制") {
-                    Label("手动控制", systemImage: "fan").tag(SettingsPage.manual)
+                    Label("风速控制", systemImage: "fan").tag(SettingsPage.manual)
                     Label("联动设备", systemImage: "air.purifier").tag(SettingsPage.device)
                     Label("联动规则", systemImage: "slider.horizontal.3").tag(SettingsPage.rules)
                 }
@@ -196,16 +196,17 @@ private struct DeviceHero: View {
 struct CompactControlBar: View {
     let controller: WorkerController
     var prominent = false
+    var compact = false
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: compact ? 8 : 10) {
             Button { primaryAction() } label: {
                 Text(primaryTitle)
-                    .frame(minWidth: prominent ? 170 : nil, minHeight: prominent ? 28 : nil)
+                    .frame(minWidth: prominent ? (compact ? 100 : 170) : nil, minHeight: prominent ? (compact ? 20 : 28) : nil)
             }
                 .buttonStyle(.borderedProminent)
-                .controlSize(prominent ? .large : .regular)
-                .font(prominent ? .headline : .body)
+                .controlSize(prominent && !compact ? .large : .regular)
+                .font(prominent && !compact ? .headline : .body)
                 .help("自动监控按已保存规则调节净化器；暂停后仍保留本机只读采样。")
                 .disabled(!canUsePrimary)
                 .keyboardShortcut(.return, modifiers: [])
@@ -239,10 +240,10 @@ struct CompactControlBar: View {
             }
         }
         switch controller.status?.mode {
-        case "enabled": return prominent ? "暂停自动监控" : (controller.status?.owner == true ? "暂停接管" : "暂停监测")
+        case "enabled": return prominent && !compact ? "暂停自动监控" : (controller.status?.owner == true ? "暂停接管" : "暂停监测")
         case "manual": return "净化器手动控制中"
-        case "paused": return prominent ? "恢复自动监控" : "恢复联动"
-        default: return prominent ? "开启自动监控" : "启用联动"
+        case "paused": return prominent && !compact ? "恢复自动监控" : "恢复联动"
+        default: return prominent && !compact ? "开启自动监控" : "启用联动"
         }
     }
 

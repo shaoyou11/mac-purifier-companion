@@ -7,7 +7,7 @@ struct ManualControlButton: View {
     let controller: WorkerController
 
     var body: some View {
-        Button("手动控制…") {
+        Button("风速控制…") {
             controller.requestedSettingsPage = .manual
             openSettings()
             NSApp.activate(ignoringOtherApps: true)
@@ -22,14 +22,15 @@ struct ManualControlSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                pageHeader("手动控制", detail: "Mac 自动交给系统；净化器自动使用已有温度联动规则。")
-                MacManualFanControl()
+                pageHeader("风速控制", detail: "查看设备回读，选择净化器的控制方式。")
                 PurifierManualControlView(controller: controller)
+                MacManualFanControl()
             }
-            .padding(20)
-            .frame(maxWidth: 920, alignment: .leading)
+            .padding(24)
+            .frame(maxWidth: 840, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
-        .navigationTitle("手动控制")
+        .navigationTitle("风速控制")
     }
 }
 
@@ -37,11 +38,26 @@ private struct MacManualFanControl: View {
     @State private var controller = MacFanController.shared
     @State private var editingFanIDs: Set<Int> = []
     @State private var confirmingHelperRemoval = false
+    @State private var helperExpanded = false
 
     var body: some View {
-        ContentSection(title: "Mac 内部风扇", subtitle: "系统自动＝本应用不接管转速，不运行 Mac 风扇自动规则。") {
+        ControlPanel(title: "Mac 内部风扇", subtitle: "默认由 macOS 管理，与净化器控制相互独立。", symbol: "fan") {
             VStack(alignment: .leading, spacing: 12) {
-                helperContent
+                if controller.helperInstalled {
+                    helperContent
+                } else {
+                    HStack {
+                        Label("系统自动管理", systemImage: "checkmark.shield")
+                            .font(.callout).foregroundStyle(.secondary)
+                        Spacer()
+                        Text("无需安装助手即可使用净化器")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    DisclosureGroup("设置 Mac 手动调速…", isExpanded: $helperExpanded) {
+                        VStack(alignment: .leading, spacing: 10) { helperContent }
+                            .padding(.top, 8)
+                    }.font(.callout)
+                }
                 if controller.helperReady {
                     if controller.fans.isEmpty {
                         Text("没有检测到可控制的风扇。无风扇机型无需调速；无法读取时不会虚构风扇。")
@@ -69,11 +85,12 @@ private struct MacManualFanControl: View {
                     Text(message).font(.callout).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if !controller.connectionMessage.isEmpty {
+                if controller.helperInstalled && !controller.connectionMessage.isEmpty {
                     Text(controller.connectionMessage).font(.caption).foregroundStyle(.secondary)
                 }
 
-                DisclosureGroup("权限与失效保护") {
+                if controller.helperInstalled || helperExpanded {
+                  DisclosureGroup("权限与失效保护") {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("手动转速使用 30 秒租约，应用负责续期。应用断开、租约到期或严重热压力时，助手会尝试交还系统；不更改或绕过 SIP。离开页面不会结束已确认的手动控制。")
                             .font(.caption).foregroundStyle(.secondary)
@@ -83,6 +100,7 @@ private struct MacManualFanControl: View {
                                 .disabled(controller.busy)
                         }
                     }.padding(.top, 6)
+                  }
                 }
             }
         }
@@ -122,6 +140,37 @@ private struct MacManualFanControl: View {
         } else if !controller.helperReady {
             Label("助手尚未就绪，不能确认或修改风扇控制。", systemImage: "exclamationmark.triangle")
                 .font(.callout).foregroundStyle(.secondary)
+        }
+    }
+}
+
+struct ControlPanel<Content: View>: View {
+    let title: String
+    let subtitle: String
+    let symbol: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 10) {
+                Image(systemName: symbol)
+                    .font(.title3).foregroundStyle(Color.accentColor)
+                    .frame(width: 36, height: 36)
+                    .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(.title3.weight(.semibold))
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            content
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 16))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16).strokeBorder(Color.primary.opacity(0.06))
         }
     }
 }

@@ -279,24 +279,42 @@ struct MenuPopoverView: View {
     @State private var detailedErrorMessage = ""
     @State private var macIdentity = MacDeviceIdentity.shared
     @State private var menuVisible = false
+    @State private var processesExpanded = false
     let controller: WorkerController
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             navigationHeader
             Divider()
-            overview
-            Divider()
-            MenuRecentCharts(
-                history: controller.connected ? controller.menuHistory : nil,
-                loading: controller.connected && controller.menuHistoryLoading,
-                paired: controller.connected && controller.status?.account.paired == true,
-                connected: controller.connected
-            )
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
-            Divider()
-            processSection
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    overview
+                    Divider().padding(.horizontal, 16)
+                    HStack {
+                        Text("最近 1 小时").font(.caption.weight(.semibold))
+                        if controller.connected && controller.menuHistoryLoading { ProgressView().controlSize(.mini) }
+                        Spacer()
+                        Button("查看趋势…") { openSettings(page: .history) }
+                            .buttonStyle(.borderless).font(.caption)
+                    }
+                    .padding(.horizontal, 16).padding(.top, 12)
+                    MenuRecentCharts(
+                        history: controller.connected ? controller.menuHistory : nil,
+                        loading: controller.connected && controller.menuHistoryLoading,
+                        paired: controller.connected && controller.status?.account.paired == true,
+                        connected: controller.connected
+                    )
+                    .padding(.horizontal, 16).padding(.vertical, 8)
+                    DisclosureGroup(isExpanded: $processesExpanded) {
+                        processSection.padding(.top, 6)
+                    } label: {
+                        Text("CPU 占用最高的进程").font(.caption).foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 16).padding(.bottom, 12)
+                }
+            }
+            .frame(height: min(processesExpanded ? 580 : 500,
+                               max(280, (NSScreen.main?.visibleFrame.height ?? 800) - 160)))
             if let message = controller.errorMessage, !message.isEmpty {
                 Divider()
                 errorRow(message)
@@ -304,7 +322,7 @@ struct MenuPopoverView: View {
             Divider()
             footer
         }
-        .frame(width: 600, alignment: .top)
+        .frame(width: 500, alignment: .top)
         .background(MenuWindowVisibility(isVisible: $menuVisible))
         .alert("操作失败", isPresented: $showingErrorDetails) {
             Button("关闭", role: .cancel) {}
@@ -314,8 +332,8 @@ struct MenuPopoverView: View {
         .task {
             await macIdentity.load()
         }
-        .task(id: menuVisible) {
-            guard menuVisible else { return }
+        .task(id: menuVisible && processesExpanded) {
+            guard menuVisible && processesExpanded else { return }
             controller.start()
             while !Task.isCancelled {
                 controller.requestProcesses()
@@ -406,107 +424,102 @@ struct MenuPopoverView: View {
             .buttonStyle(.borderless)
             .disabled(controller.launching || (controller.connected && !controller.isActionable))
             .help(controller.connected ? "刷新状态" : "重新连接后台")
-            Button("规则…") { openSettings(page: .rules) }.buttonStyle(.borderless)
-            Button("历史…") { openSettings(page: .history) }.buttonStyle(.borderless)
-            Button("设置…") { openSettings(page: .overview) }
+            Button { openSettings(page: .overview) } label: {
+                Image(systemName: "gearshape")
+            }
+                .help("打开设置").accessibilityLabel("打开设置")
                 .buttonStyle(.borderless)
                 .keyboardShortcut(",", modifiers: .command)
         }
         .padding(.horizontal, 14)
-        .frame(height: 44)
+        .frame(height: 52)
     }
 
     private var overview: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 18) {
-                deviceIdentity
-                    .frame(width: 198, alignment: .leading)
-                primaryReadings
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-            }
-
-            HStack(spacing: 10) {
-                CompactControlBar(controller: controller, prominent: true)
+            deviceIdentity
+            primaryReadings
+            HStack(spacing: 8) {
+                CompactControlBar(controller: controller, prominent: true, compact: true)
                 Spacer(minLength: 0)
-                ManualControlButton(controller: controller)
+                ManualControlButton(controller: controller).controlSize(.small)
             }
-
             if controller.connected, let status = controller.status, status.account.paired {
-                VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "info.circle").foregroundStyle(.secondary)
                     Text(status.reason)
-                        .font(.caption)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    if status.mode == "enabled" || status.mode == "dryRun" {
-                        Text("退出接管恢复原来的模式和档位，不保证最低转速。")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
+                    Spacer(minLength: 0)
+                    Button("规则…") { openSettings(page: .rules) }
+                        .buttonStyle(.borderless).font(.caption)
                 }
             }
-
             secondaryReadings
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(16)
     }
 
     private var deviceIdentity: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(spacing: 12) {
             DeviceStackArtwork(mac: macIdentity, purifierModel: pairedDevice?.model,
-                               imageURL: pairedDevice?.imageURL, height: 134)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(macIdentity.name)
-                    .font(.system(size: 16, weight: .semibold))
-                    .lineLimit(2)
-                Text(macIdentity.identifier + " · " + macIdentity.chip)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                Spacer(minLength: 4)
-                Text(purifierName)
-                    .font(.system(size: 16, weight: .semibold))
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.8)
-                Text(purifierModel)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                Text(purifierAvailability)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                               imageURL: pairedDevice?.imageURL, height: 76)
+                .frame(width: 44)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(purifierName).font(.system(size: 16, weight: .semibold))
+                        .lineLimit(1).minimumScaleFactor(0.85)
+                        .help(purifierModel)
+                    Spacer(minLength: 4)
+                    Label(purifierAvailability, systemImage: pairedDevice?.reachable == true ? "checkmark.circle.fill" : "exclamationmark.circle")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(pairedDevice?.reachable == true ? Color.green : Color.secondary)
+                }
+                HStack(spacing: 5) {
+                    Image(systemName: "desktopcomputer")
+                    Text(macIdentity.name)
+                    Text("·")
+                    Text(macIdentity.chip)
+                }
+                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                .help(macIdentity.identifier)
+                Text(deviceSummary).font(.caption.weight(.medium))
+                    .foregroundStyle(Color.accentColor)
             }
-            .frame(height: 134, alignment: .topLeading)
         }
-        .accessibilityElement(children: .contain)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    @ViewBuilder
     private var primaryReadings: some View {
-        if let status = freshStatus {
-            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 12) {
-                GridRow {
-                    popupMetric("CPU 温度", temperature(status.temperature.stale ? nil : status.temperature.cpu), prominent: true)
-                    popupMetric("GPU 温度", temperature(status.temperature.stale ? nil : status.temperature.gpu), prominent: true)
-                }
-                GridRow {
-                    popupMetric("CPU 活跃", percent(status.temperature.stale ? nil : status.temperature.cpuLoad), prominent: true)
-                    popupMetric("GPU 活跃", percent(status.system.stale ? nil : status.system.gpuLoad), prominent: true)
-                }
-            }
-        } else {
-            HStack(alignment: .top, spacing: 7) {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(hostUnavailableText).lineLimit(2)
-                    Button("查看详情…") { openSettings(page: .overview) }.buttonStyle(.borderless)
-                }
-            }
-            .font(.caption)
-            .frame(maxWidth: .infinity, minHeight: 134, alignment: .topLeading)
+        HStack(alignment: .top, spacing: 8) {
+            readingCard("CPU 温度", temperature(freshStatus?.temperature.stale == false ? freshStatus?.temperature.cpu : nil),
+                        detail: "活跃 " + percent(freshStatus?.temperature.stale == false ? freshStatus?.temperature.cpuLoad : nil))
+            readingCard("GPU 温度", temperature(freshStatus?.temperature.stale == false ? freshStatus?.temperature.gpu : nil),
+                        detail: "活跃 " + percent(freshStatus?.system.stale == false ? freshStatus?.system.gpuLoad : nil))
+            readingCard("净化器转速", purifierRPM,
+                        detail: pairedDevice?.reachable == true ? "设备实时回读" : purifierAvailability)
         }
+    }
+
+    private var purifierRPM: String {
+        guard controller.connected, let status = controller.status,
+              status.account.paired, status.device.reachable, status.device.power == true,
+              !status.temperature.stale, status.commandState != "unknown",
+              let rpm = status.device.rpm else { return "—" }
+        return "\(rpm) RPM"
+    }
+
+    private func readingCard(_ title: String, _ value: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 21, weight: .semibold, design: .rounded))
+                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
+            Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.75), in: RoundedRectangle(cornerRadius: 11))
     }
 
     @ViewBuilder
@@ -526,7 +539,7 @@ struct MenuPopoverView: View {
     private var processSection: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("CPU 最高进程").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                Text("最近采样").font(.caption2).foregroundStyle(.secondary)
                 Spacer()
                 if controller.connected && controller.processesLoading { ProgressView().controlSize(.mini) }
             }
@@ -545,11 +558,12 @@ struct MenuPopoverView: View {
                 ForEach(Array(processes)) { process in
                     HStack(spacing: 6) {
                         Text(process.name).lineLimit(1).truncationMode(.middle)
-                        Text("PID \(process.pid)").foregroundStyle(.tertiary).lineLimit(1)
+
                         Spacer(minLength: 8)
                         Text(String(format: "%.1f%%", process.cpuPercent)).monospacedDigit()
                     }
-                    .font(.system(size: 13))
+                    .font(.system(size: 12))
+                    .help("PID \(process.pid)")
                 }
             } else {
                 Text(controller.processesLoading ? "正在读取进程…" : "暂无进程采样")
@@ -581,7 +595,7 @@ struct MenuPopoverView: View {
 
     private var footer: some View {
         HStack(spacing: 12) {
-            MenuBarAppearancePicker().labelsHidden().frame(width: 168)
+            MenuBarAppearancePicker().labelsHidden().frame(width: 145).controlSize(.small)
             if controller.connected && controller.status?.account.paired == true {
                 Button("设备…") { openSettings(page: .device) }.buttonStyle(.borderless)
             } else {
@@ -651,7 +665,7 @@ struct MenuPopoverView: View {
     private func popupMetric(_ title: String, _ value: String, prominent: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
-            Text(value).font(.system(size: prominent ? 23 : 16, weight: .semibold, design: .rounded))
+            Text(value).font(.system(size: prominent ? 23 : 13, weight: .semibold, design: .rounded))
                 .monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -666,18 +680,18 @@ private struct MenuRecentCharts: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text("最近 1 小时").font(.system(size: 12, weight: .semibold))
-                Spacer()
-                if loading { ProgressView().controlSize(.mini) }
-            }
             if connected, let history, !history.points.isEmpty {
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible())], spacing: 6) {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible())], spacing: 8) {
                     spark(title: "CPU / GPU 温度", latest: latestTemperatures(history.points), unit: "°C", samples: samples(history.points, name: "CPU", keyPath: \.cpu) + samples(history.points, name: "GPU", keyPath: \.gpu), colors: ["CPU": .orange, "GPU": .purple])
-                    spark(title: "CPU / GPU 活跃度", latest: latestActivity(history.points), unit: "%", samples: samples(history.points, name: "CPU", keyPath: \.cpuLoad) + samples(history.points, name: "GPU", keyPath: \.gpuLoad), colors: ["CPU": .blue, "GPU": .indigo], domain: 0...100)
-                    spark(title: "内存 / Swap", latest: latestMemory(history.points), unit: "GB", samples: samples(history.points, name: "内存", keyPath: \.memoryUsed, divisor: 1_073_741_824) + samples(history.points, name: "Swap", keyPath: \.swapUsed, divisor: 1_073_741_824), colors: ["内存": .teal, "Swap": .mint])
                     spark(title: paired ? "Mac 风扇 / 净化器" : "Mac 风扇", latest: latestFans(history.points), unit: "RPM", samples: fanSamples(history.points), colors: fanColors(history.points))
                 }
+                DisclosureGroup("更多趋势") {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible())], spacing: 8) {
+                    spark(title: "CPU / GPU 活跃度", latest: latestActivity(history.points), unit: "%", samples: samples(history.points, name: "CPU", keyPath: \.cpuLoad) + samples(history.points, name: "GPU", keyPath: \.gpuLoad), colors: ["CPU": .blue, "GPU": .indigo], domain: 0...100)
+                    spark(title: "内存 / Swap", latest: latestMemory(history.points), unit: "GB", samples: samples(history.points, name: "内存", keyPath: \.memoryUsed, divisor: 1_073_741_824) + samples(history.points, name: "Swap", keyPath: \.swapUsed, divisor: 1_073_741_824), colors: ["内存": .teal, "Swap": .mint])
+                    }.padding(.top, 6)
+                }
+                .font(.caption).foregroundStyle(.secondary)
             } else {
                 ContentUnavailableView(
                     connected ? (loading ? "正在读取趋势" : "暂无趋势样本") : "后台未连接",
@@ -687,7 +701,7 @@ private struct MenuRecentCharts: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(height: 188, alignment: .top)
+        .frame(minHeight: 112, alignment: .top)
     }
 
     private func spark(title: String, latest: String, unit: String, samples: [MetricSample], colors: [String: Color], domain: ClosedRange<Double>? = nil) -> some View {
@@ -705,15 +719,16 @@ private struct MenuRecentCharts: View {
                 .interpolationMethod(.linear)
             }
             .chartForegroundStyleScale(domain: colors.keys.sorted(), range: colors.keys.sorted().compactMap { colors[$0] })
-            .chartLegend(.hidden)
+            .chartLegend(.visible)
+            .chartLegend(position: .bottom, alignment: .leading, spacing: 2)
             .chartXAxis(.hidden)
             .chartYAxis(.hidden)
             .chartYScale(domain: domain ?? automaticDomain(samples))
-            .frame(height: 30)
+            .frame(height: 43)
             .accessibilityLabel("\(title)，最近一小时，最新值 \(latest)")
         }
-        .padding(6)
-        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 7))
+        .padding(9)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.65), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private func samples(_ points: [HistoryPoint], name: String, keyPath: KeyPath<HistoryPoint, Double?>, divisor: Double = 1) -> [MetricSample] {
