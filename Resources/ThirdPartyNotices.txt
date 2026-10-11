@@ -126,3 +126,7 @@ trademarks. Public signed image URLs originate in the linked catalog, not in
 user credentials. Each identified model records its public metadata page.
 The independently maintained Xiaomi Miot Spec index is https://home.miot-spec.com/.
 No affiliation, endorsement, or additional image-use permission is claimed.
+
+Sparkle 2.10.0
+Copyright Sparkle Project and contributors.
+BSD-style license and bundled component notices: licenses/Sparkle/LICENSE

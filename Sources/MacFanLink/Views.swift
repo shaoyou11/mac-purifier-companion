@@ -476,6 +476,8 @@ private struct RuntimeSettingsView: View {
                     if let message = controller.loginMessage { Text(message).font(.caption).foregroundStyle(.red) }
                 }
 
+                AppUpdateSettings()
+
                 ContentSection(title: "持续状态通知", subtitle: "默认关闭。仅在你主动开启后，针对持续满足条件的状态发送提醒。") {
                     Toggle("允许持续状态提醒", isOn: Binding(get: { controller.notificationsEnabled }, set: { controller.setNotificationsEnabled($0) }))
                         .disabled(controller.notificationBusy)

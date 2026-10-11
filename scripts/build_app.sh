@@ -198,6 +198,9 @@ with open(path, "wb") as output:
     plistlib.dump(info, output, sort_keys=True)
 PY
 
+/usr/bin/python3 "$ROOT/scripts/embed_updater.py" --app "$APP" \
+    --artifacts "$SWIFT_BUILD/artifacts/sparkle/Sparkle" --identity "$SIGN_IDENTITY"
+
 chmod 0755 "$APP/Contents/MacOS/$APP_NAME" \
     "$APP/Contents/Resources/runtime/bin/python3.12" \
     "$APP/Contents/Resources/bin/macmon" \

@@ -602,6 +602,7 @@ struct MenuPopoverView: View {
                 Button("连接设备…") { openSettings(page: .account) }.buttonStyle(.borderless)
             }
             Spacer()
+            CheckForAppUpdatesButton().buttonStyle(.borderless)
             Button("退出") { NSApp.terminate(nil) }
                 .buttonStyle(.borderless)
                 .keyboardShortcut("q", modifiers: .command)

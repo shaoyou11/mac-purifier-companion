@@ -8,11 +8,15 @@ let package = Package(
         .executable(name: "MacFanLink", targets: ["MacFanLink"]),
         .executable(name: "FanHelper", targets: ["FanHelper"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.0")
+    ],
     targets: [
         .executableTarget(
             name: "MacFanLink",
-            dependencies: ["FanControlProtocol"],
-            swiftSettings: [.defaultIsolation(MainActor.self)]
+            dependencies: ["FanControlProtocol", .product(name: "Sparkle", package: "Sparkle")],
+            swiftSettings: [.defaultIsolation(MainActor.self)],
+            linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
         ),
         .target(name: "FanControlProtocol"),
         .executableTarget(name: "FanHelper", dependencies: ["FanControlProtocol"]),

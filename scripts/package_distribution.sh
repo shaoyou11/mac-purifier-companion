@@ -24,7 +24,7 @@ mkdir -p "$SOURCE_ROOT/Sources/MacFanLink" "$SOURCE_ROOT/scripts" \
 
 # This is an explicit source whitelist. It intentionally cannot capture .git,
 # .local, .venv, build output, credentials, state, or temporary QR images.
-for file in Package.swift pyproject.toml uv.lock LICENSE REQUIREMENTS.md .gitignore; do
+for file in Package.swift Package.resolved pyproject.toml uv.lock LICENSE REQUIREMENTS.md .gitignore; do
     [[ -f "$ROOT/$file" ]] || { printf 'error: required source file missing: %s\n' "$file" >&2; exit 1; }
     /usr/bin/ditto "$ROOT/$file" "$SOURCE_ROOT/$file"
 done
@@ -46,7 +46,7 @@ while IFS= read -r -d '' test_source; do
     /usr/bin/ditto "$test_source" "$SOURCE_ROOT/tests/FanHelperTests/$(basename "$test_source")"
 done < <(find "$ROOT/tests/FanHelperTests" -maxdepth 1 -type f -name '*.swift' -print0)
 
-for resource in model-catalog.json ThirdPartyNotices.txt cc.ss-data.MacFanLink.FanHelper.plist; do
+for resource in updater.json model-catalog.json ThirdPartyNotices.txt cc.ss-data.MacFanLink.FanHelper.plist; do
     [[ -f "$ROOT/Resources/$resource" ]] || { printf 'error: required resource missing: %s\n' "$resource" >&2; exit 1; }
     /usr/bin/ditto "$ROOT/Resources/$resource" "$SOURCE_ROOT/Resources/$resource"
 done

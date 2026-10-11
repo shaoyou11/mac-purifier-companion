@@ -20,6 +20,7 @@ struct MacFanLinkApp: App {
         .defaultSize(width: 980, height: 680)
         .windowResizability(.contentMinSize)
         .commands {
+            CommandGroup(after: .appInfo) { CheckForAppUpdatesButton() }
             CommandGroup(replacing: .appSettings) {
                 SettingsLink { Text("设置…") }
                     .keyboardShortcut(",", modifiers: .command)
@@ -32,6 +33,7 @@ struct MacFanLinkApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         WorkerController.shared.start()
+        AppUpdater.shared.start()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
